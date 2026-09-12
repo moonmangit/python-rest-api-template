@@ -1,0 +1,6 @@
+{
+  "version": "1",
+  "name": "my-fastapi-app",
+  "type": "collection",
+  "defaultEnvironment": "local"
+}
