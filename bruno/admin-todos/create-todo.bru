@@ -1,0 +1,22 @@
+meta {
+  name: Admin Create Todo
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v1/admin/todos/
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+}
+
+body:json {
+  {
+    "owner_id": 1,
+    "title": "Admin-created task"
+  }
+}

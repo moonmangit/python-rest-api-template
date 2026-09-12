@@ -3,16 +3,30 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.core.config import settings
-from app.core.database import Base, engine
+from app.core.config import DEVELOPMENT_JWT_SECRET, settings
+from app.core.database import Base, SessionLocal, engine
 from app.features.router import router as features_router
-from app.features.users.domain import User  # noqa: F401
+from app.features.todo.domain import model as _todo_model  # noqa: F401
+from app.features.user.application.service import ensure_admin
+from app.features.user.domain import User  # noqa: F401
 from app.shared.health import router as health_router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    if (
+        settings.environment == "production"
+        and settings.jwt_secret_key == DEVELOPMENT_JWT_SECRET
+    ):
+        raise RuntimeError("JWT_SECRET_KEY must be changed in production")
     Base.metadata.create_all(bind=engine)
+    if settings.admin_username and settings.admin_password:
+        with SessionLocal() as db:
+            ensure_admin(
+                db,
+                username=settings.admin_username,
+                password=settings.admin_password,
+            )
     yield
 
 

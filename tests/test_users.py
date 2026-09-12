@@ -1,12 +1,12 @@
 import pytest
 
-from app.features.users.application.service import (
+from app.features.user.application.service import (
     InvalidUserError,
     UserAlreadyExistsError,
     create_user,
     list_users,
 )
-from app.features.users.presentation.schemas import UserCreate
+from app.features.user.presentation.schemas import UserCreate
 
 
 def test_create_and_list_users(db) -> None:

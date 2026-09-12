@@ -1,0 +1,21 @@
+meta {
+  name: Admin Update Todo
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/admin/todos/1
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+}
+
+body:json {
+  {
+    "completed": true
+  }
+}

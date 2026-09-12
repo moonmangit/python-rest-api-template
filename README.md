@@ -1,6 +1,7 @@
-# My FastAPI App
+# Todo API
 
-A small FastAPI service using PostgreSQL and SQLAlchemy.
+A FastAPI todo service using PostgreSQL, SQLAlchemy, JWT cookies, and role-based
+authorization.
 
 ## Architecture
 
@@ -11,10 +12,18 @@ app/
 ├── core/       # Configuration and database infrastructure
 ├── shared/     # Cross-feature dependencies and health checks
 └── features/
-    └── users/
-        ├── domain/        # User entity and persistence model
-        ├── application/   # User use cases
-        └── presentation/  # HTTP router and schemas
+    ├── auth/
+    │   ├── domain/        # Authentication domain boundary
+    │   ├── application/   # Authentication use cases
+    │   └── presentation/  # Authentication router and dependencies
+    ├── user/
+    │   ├── domain/        # User entity and persistence model
+    │   ├── application/   # User use cases
+    │   └── presentation/  # HTTP router and schemas
+    └── todo/
+        ├── domain/        # Todo entity and persistence model
+        ├── application/   # Todo use cases and ownership rules
+        └── presentation/  # HTTP routers and schemas
 ```
 
 New business capabilities belong under `app/features/<feature>/`. Keep each
@@ -32,7 +41,7 @@ The domain describes what the business concept is and which rules belong to it.
 For the users feature:
 
 ```text
-app/features/users/domain/model.py
+app/features/user/domain/model.py
 ```
 
 The `User` entity lives here. Domain code must not know about HTTP requests,
@@ -52,7 +61,7 @@ domain errors.
 For the users feature:
 
 ```text
-app/features/users/application/service.py
+app/features/user/application/service.py
 ```
 
 `create_user()` is an application use case. It normalizes the email, checks for
@@ -67,8 +76,8 @@ this project that interface is FastAPI.
 For the users feature:
 
 ```text
-app/features/users/presentation/router.py
-app/features/users/presentation/schemas.py
+app/features/user/presentation/router.py
+app/features/user/presentation/schemas.py
 ```
 
 The router owns URLs, dependency injection, request validation, response models,
@@ -163,13 +172,27 @@ The API runs at `http://127.0.0.1:3001`.
 
 - `GET /health/live` checks that the process is running.
 - `GET /health/ready` checks PostgreSQL connectivity.
-- `GET /api/v1/users/` lists users.
-- `POST /api/v1/users/` creates a user.
+- `POST /api/v1/auth/register` registers a user without authentication. The
+  first registered user becomes an administrator automatically; later users
+  are normal users.
+- `POST /api/v1/auth/login` authenticates and sets the HttpOnly JWT cookie.
+- `GET /api/v1/auth/me` returns the current user.
+- `POST /api/v1/auth/logout` clears the authentication cookie.
+- `DELETE /api/v1/auth/me` deletes the current account and owned todos.
+- `GET/POST /api/v1/users/` and `GET/PATCH/DELETE /api/v1/users/{id}` provide
+  admin-only user management.
+- `GET/POST /api/v1/todos/` and `GET/PATCH/DELETE /api/v1/todos/{id}` provide
+  authenticated users' own todo CRUD.
+- `GET/POST /api/v1/admin/todos/` and `GET/PATCH/DELETE
+  /api/v1/admin/todos/{id}` provide admin todo management across users.
 - `GET /docs` opens the development OpenAPI UI.
 
-Copy `.env.example` to `.env` when local configuration overrides are needed. Missing
-tables are created automatically when the application starts. For local schema
-changes, use `just clean` only when existing development data can be discarded.
+Copy `.env.example` to `.env` when local configuration overrides are needed.
+Setting `ADMIN_USERNAME` and `ADMIN_PASSWORD` bootstraps an administrator on
+startup. Missing tables are created automatically when the application starts.
+The existing starter schema predates the todo/auth tables and `create_all()` does
+not alter existing tables; use a migration or reset the local database before
+running against an old development database.
 
 Run `just check` before opening a pull request. CI runs the same quality checks
 with the locked uv dependencies.
