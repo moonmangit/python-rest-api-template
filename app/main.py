@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.config import settings
 from app.core.database import Base, engine
@@ -17,6 +18,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 docs_enabled = settings.environment != "production"
+if settings.environment == "production" and len(settings.jwt_secret_key) < 32:
+    raise RuntimeError(
+        "JWT_SECRET_KEY must be set to at least 32 characters in production"
+    )
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
@@ -24,6 +29,12 @@ app = FastAPI(
     docs_url="/docs" if docs_enabled else None,
     redoc_url="/redoc" if docs_enabled else None,
     openapi_url="/openapi.json" if docs_enabled else None,
+)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.jwt_secret_key or "development-only-oauth-state-key",
+    https_only=settings.environment == "production",
+    same_site="lax",
 )
 app.include_router(health_router)
 app.include_router(features_router, prefix=settings.api_v1_prefix)

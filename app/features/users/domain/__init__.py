@@ -1,3 +1,3 @@
-from app.features.users.domain.model import User
+from app.features.users.domain.model import User, UserRole
 
-__all__ = ["User"]
+__all__ = ["User", "UserRole"]

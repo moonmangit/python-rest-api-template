@@ -1,11 +1,11 @@
 meta {
-  name: Create User
+  name: Update User
   type: http
-  seq: 2
+  seq: 4
 }
 
-post {
-  url: {{baseUrl}}/api/v1/users/
+patch {
+  url: {{baseUrl}}/api/v1/users/1
   body: json
   auth: none
 }
@@ -16,8 +16,7 @@ headers {
 
 body:json {
   {
-    "name": "Jane Doe",
-    "email": "jane@example.com",
+    "name": "Jane Updated",
     "role": "user"
   }
 }

@@ -14,7 +14,12 @@ clean:
 
 # Start the FastAPI development server with reload enabled.
 dev:
+    uv run alembic upgrade head
     uv run python main.py
+
+# Apply database migrations.
+migrate:
+    uv run alembic upgrade head
 
 # Run the test suite.
 test:

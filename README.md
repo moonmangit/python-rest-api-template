@@ -11,6 +11,7 @@ app/
 ├── core/       # Configuration and database infrastructure
 ├── shared/     # Cross-feature dependencies and health checks
 └── features/
+    ├── auth/         # Google OAuth and JWT authentication
     └── users/
         ├── domain/        # User entity and persistence model
         ├── application/   # User use cases
@@ -154,6 +155,7 @@ The API runs at `http://127.0.0.1:3001`.
 | `just setdown` | Stop PostgreSQL and preserve data |
 | `just clean` | Remove PostgreSQL containers and volumes |
 | `just dev` | Start the reload-enabled API server |
+| `just migrate` | Apply database migrations |
 | `just test` | Run tests |
 | `just lint` | Run Ruff checks |
 | `just format` | Format Python files |
@@ -164,12 +166,30 @@ The API runs at `http://127.0.0.1:3001`.
 - `GET /health/live` checks that the process is running.
 - `GET /health/ready` checks PostgreSQL connectivity.
 - `GET /api/v1/users/` lists users.
-- `POST /api/v1/users/` creates a user.
+- `POST /api/v1/users/` creates a user (admin only).
+- `GET /api/v1/users/{id}` gets a user (admin only).
+- `PATCH /api/v1/users/{id}` updates a user (admin only).
+- `DELETE /api/v1/users/{id}` deletes a user (admin only).
+- `GET /api/v1/auth/google/login` starts Google login.
+- `GET /api/v1/auth/me` returns the logged-in user.
+- `POST /api/v1/auth/logout` clears the JWT authentication cookie.
 - `GET /docs` opens the development OpenAPI UI.
 
 Copy `.env.example` to `.env` when local configuration overrides are needed. Missing
-tables are created automatically when the application starts. For local schema
-changes, use `just clean` only when existing development data can be discarded.
+tables are created automatically when the application starts. For an existing
+database, run `uv run alembic upgrade head` after deploying the schema change.
+
+Create a Google OAuth Web application client in GCP and add this authorized
+redirect URI:
+
+```text
+http://127.0.0.1:3001/api/v1/auth/google/callback
+```
+
+Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and a random `JWT_SECRET_KEY` in
+`.env`. Authentication uses a signed JWT stored in an `HttpOnly` cookie named
+`access_token`. The first Google account becomes `admin`; later accounts become
+`user`. User CRUD endpoints require an admin JWT.
 
 Run `just check` before opening a pull request. CI runs the same quality checks
 with the locked uv dependencies.

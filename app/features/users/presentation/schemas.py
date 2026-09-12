@@ -1,11 +1,22 @@
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from app.features.users.domain.model import UserRole
+
 
 class UserCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=100)
     email: EmailStr
+    role: UserRole = UserRole.USER
+
+
+class UserUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    email: EmailStr | None = None
+    role: UserRole | None = None
 
 
 class UserResponse(BaseModel):
@@ -14,3 +25,4 @@ class UserResponse(BaseModel):
     id: int
     name: str
     email: EmailStr
+    role: UserRole
