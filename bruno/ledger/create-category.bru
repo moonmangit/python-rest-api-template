@@ -1,0 +1,23 @@
+meta {
+  name: Create Ledger Category
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v1/ledger/categories
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+  x-csrf-token: {{csrfToken}}
+}
+
+body:json {
+  {
+    "name": "Food",
+    "category_type": "expense"
+  }
+}

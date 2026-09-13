@@ -1,0 +1,15 @@
+meta {
+  name: Archive Ledger Category
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/v1/ledger/categories/1/archive
+  body: none
+  auth: none
+}
+
+headers {
+  x-csrf-token: {{csrfToken}}
+}

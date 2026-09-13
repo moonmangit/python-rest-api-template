@@ -1,15 +1,22 @@
+from datetime import datetime, timezone
 from enum import StrEnum
 
+from sqlalchemy import DateTime, String
 from sqlalchemy import Enum as SqlEnum
-from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
 
 class UserRole(StrEnum):
+    GUEST = "guest"
+    MEMBER = "member"
     ADMIN = "admin"
-    USER = "user"
+
+
+class UserStatus(StrEnum):
+    ENABLED = "enabled"
+    DISABLED = "disabled"
 
 
 class User(Base):
@@ -27,9 +34,34 @@ class User(Base):
         SqlEnum(
             UserRole,
             native_enum=False,
-            length=5,
+            length=6,
             values_callable=lambda roles: [role.value for role in roles],
         ),
         nullable=False,
-        default=UserRole.USER,
+        default=UserRole.MEMBER,
+    )
+    status: Mapped[UserStatus] = mapped_column(
+        SqlEnum(
+            UserStatus,
+            native_enum=False,
+            length=8,
+            values_callable=lambda statuses: [status.value for status in statuses],
+        ),
+        nullable=False,
+        default=UserStatus.ENABLED,
+    )
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+    default_currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="USD"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )

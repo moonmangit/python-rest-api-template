@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.features.users.domain.model import UserRole
+from app.features.users.domain.model import UserRole, UserStatus
 
 
 class UserCreate(BaseModel):
@@ -8,7 +8,7 @@ class UserCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=100)
     email: EmailStr
-    role: UserRole = UserRole.USER
+    role: UserRole = UserRole.MEMBER
 
 
 class UserUpdate(BaseModel):
@@ -17,6 +17,7 @@ class UserUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     email: EmailStr | None = None
     role: UserRole | None = None
+    status: UserStatus | None = None
 
 
 class UserResponse(BaseModel):
@@ -26,3 +27,6 @@ class UserResponse(BaseModel):
     name: str
     email: EmailStr
     role: UserRole
+    status: UserStatus
+    timezone: str
+    default_currency: str

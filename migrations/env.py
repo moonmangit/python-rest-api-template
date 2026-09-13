@@ -5,6 +5,17 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import settings
 from app.core.database import Base
+from app.features.auth.domain.model import (  # noqa: F401
+    ApplicationGrant,
+    AuditEvent,
+    RefreshSession,
+)
+from app.features.spending_ledger.domain.model import (  # noqa: F401
+    Attachment,
+    Category,
+    IdempotencyKey,
+    LedgerRecord,
+)
 from app.features.users.domain import User  # noqa: F401
 
 config = context.config

@@ -1,0 +1,27 @@
+meta {
+  name: Create Ledger Record
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/api/v1/ledger/records
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+  x-csrf-token: {{csrfToken}}
+  idempotency-key: receipt-001
+}
+
+body:json {
+  {
+    "record_type": "expense",
+    "amount_minor": 1250,
+    "record_date": "2026-01-03",
+    "category_id": 1,
+    "currency_code": "USD"
+  }
+}

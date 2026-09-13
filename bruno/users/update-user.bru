@@ -12,11 +12,12 @@ patch {
 
 headers {
   content-type: application/json
+  x-csrf-token: {{csrfToken}}
 }
 
 body:json {
   {
     "name": "Jane Updated",
-    "role": "user"
+    "role": "member"
   }
 }

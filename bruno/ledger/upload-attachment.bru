@@ -1,0 +1,19 @@
+meta {
+  name: Upload Record Attachment
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{baseUrl}}/api/v1/ledger/records/1/attachments
+  body: multipart-form
+  auth: none
+}
+
+headers {
+  x-csrf-token: {{csrfToken}}
+}
+
+body:multipart-form {
+  file: @receipt.png
+}

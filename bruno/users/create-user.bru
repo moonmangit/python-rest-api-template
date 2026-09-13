@@ -12,12 +12,13 @@ post {
 
 headers {
   content-type: application/json
+  x-csrf-token: {{csrfToken}}
 }
 
 body:json {
   {
     "name": "Jane Doe",
     "email": "jane@example.com",
-    "role": "user"
+    "role": "member"
   }
 }

@@ -1,0 +1,22 @@
+meta {
+  name: Set Application Grant
+  type: http
+  seq: 6
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/users/1/applications/spending_ledger
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+  x-csrf-token: {{csrfToken}}
+}
+
+body:json {
+  {
+    "enabled": true
+  }
+}

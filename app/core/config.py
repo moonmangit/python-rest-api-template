@@ -16,9 +16,16 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://127.0.0.1:3001/api/v1/auth/google/callback"
+    auth_success_redirect_uri: str = "/api/v1/auth/me"
     jwt_secret_key: str = Field(default="", min_length=32)
-    jwt_expire_minutes: int = Field(default=60, gt=0)
+    jwt_expire_minutes: int = Field(default=15, gt=0)
+    refresh_expire_days: int = Field(default=30, gt=0)
     auth_cookie_name: str = "access_token"
+    refresh_cookie_name: str = "refresh_token"
+    csrf_cookie_name: str = "csrf_token"
+    upload_dir: str = "data/uploads"
+    cors_allowed_origins: str = ""
+    auth_rate_limit_per_minute: int = Field(default=60, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",

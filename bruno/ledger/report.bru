@@ -1,0 +1,11 @@
+meta {
+  name: Ledger Report
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{baseUrl}}/api/v1/ledger/reports?start_date=2026-01-01&end_date=2026-01-31&granularity=day&currency_code=USD
+  body: none
+  auth: none
+}

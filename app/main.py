@@ -2,11 +2,24 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.config import settings
 from app.core.database import Base, engine
+from app.core.rate_limit import AuthRateLimitMiddleware
+from app.features.auth.domain.model import (  # noqa: F401
+    ApplicationGrant,
+    AuditEvent,
+    RefreshSession,
+)
 from app.features.router import router as features_router
+from app.features.spending_ledger.domain.model import (  # noqa: F401
+    Attachment,
+    Category,
+    IdempotencyKey,
+    LedgerRecord,
+)
 from app.features.users.domain import User  # noqa: F401
 from app.shared.health import router as health_router
 
@@ -36,6 +49,18 @@ app.add_middleware(
     https_only=settings.environment == "production",
     same_site="lax",
 )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        origin.strip()
+        for origin in settings.cors_allowed_origins.split(",")
+        if origin.strip()
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-CSRF-Token", "Idempotency-Key"],
+)
+app.add_middleware(AuthRateLimitMiddleware, limit=settings.auth_rate_limit_per_minute)
 app.include_router(health_router)
 app.include_router(features_router, prefix=settings.api_v1_prefix)
 

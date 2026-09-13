@@ -8,7 +8,7 @@ from app.features.users.application.service import (
 from app.features.users.domain import UserRole
 
 
-def test_first_google_account_is_admin_and_later_accounts_are_users(db) -> None:
+def test_first_google_account_is_admin_and_later_accounts_are_guests(db) -> None:
     first = authenticate_google_user(
         db,
         google_subject="google-first",
@@ -23,7 +23,7 @@ def test_first_google_account_is_admin_and_later_accounts_are_users(db) -> None:
     )
 
     assert first.role == UserRole.ADMIN
-    assert second.role == UserRole.USER
+    assert second.role == UserRole.GUEST
 
 
 def test_google_login_reuses_existing_identity(db) -> None:

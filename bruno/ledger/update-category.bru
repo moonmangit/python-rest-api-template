@@ -1,0 +1,23 @@
+meta {
+  name: Update Ledger Category
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/ledger/categories/1
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+  x-csrf-token: {{csrfToken}}
+}
+
+body:json {
+  {
+    "name": "Groceries",
+    "sort_order": 1
+  }
+}

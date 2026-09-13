@@ -1,0 +1,11 @@
+meta {
+  name: List Ledger Records
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/v1/ledger/records?limit=50&currency_code=USD
+  body: none
+  auth: none
+}

@@ -1,0 +1,23 @@
+meta {
+  name: Update Ledger Record
+  type: http
+  seq: 8
+}
+
+patch {
+  url: {{baseUrl}}/api/v1/ledger/records/1
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+  x-csrf-token: {{csrfToken}}
+}
+
+body:json {
+  {
+    "amount_minor": 1500,
+    "note": "Updated receipt"
+  }
+}

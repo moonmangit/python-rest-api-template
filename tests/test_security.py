@@ -9,6 +9,8 @@ from app.core.security import (
     create_access_token,
     decode_access_token,
     set_auth_cookie,
+    set_csrf_cookie,
+    set_refresh_cookie,
 )
 
 
@@ -71,3 +73,21 @@ def test_auth_cookie_is_http_only_and_can_be_cleared(monkeypatch) -> None:
         for key, value in response.raw_headers
         if key == b"set-cookie"
     )
+
+
+def test_session_cookies_have_expected_security_attributes(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "environment", "production")
+    response = Response()
+    set_auth_cookie(response, "access")
+    set_refresh_cookie(response, "refresh")
+    set_csrf_cookie(response, "csrf")
+
+    cookies = b"\n".join(
+        value for key, value in response.raw_headers if key == b"set-cookie"
+    ).decode()
+    assert "access_token=access" in cookies
+    assert "refresh_token=refresh" in cookies
+    assert "csrf_token=csrf" in cookies
+    assert cookies.count("HttpOnly") == 2
+    assert cookies.count("Secure") == 3
+    assert cookies.count("SameSite=lax") == 3

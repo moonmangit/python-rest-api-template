@@ -65,7 +65,7 @@ def test_final_admin_cannot_be_demoted_or_deleted(db) -> None:
     )
 
     with pytest.raises(LastAdminError):
-        update_user(db, admin.id, role=UserRole.USER)
+        update_user(db, admin.id, role=UserRole.MEMBER)
 
     with pytest.raises(LastAdminError):
         delete_user(db, admin.id)

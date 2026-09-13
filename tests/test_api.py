@@ -35,6 +35,7 @@ def test_user_routes_require_admin_and_support_crud(db, monkeypatch) -> None:
         ) as client:
             assert (await client.get("/api/v1/users/")).status_code == 401
             client.cookies.set(settings.auth_cookie_name, create_access_token(admin.id))
+            client.cookies.set(settings.csrf_cookie_name, "csrf-token")
             authenticated = await client.get("/api/v1/auth/me")
             assert authenticated.status_code == 200
             assert authenticated.json()["email"] == "admin@example.com"
@@ -45,22 +46,27 @@ def test_user_routes_require_admin_and_support_crud(db, monkeypatch) -> None:
             created = await client.post(
                 "/api/v1/users/",
                 json={"name": "Jane Doe", "email": "jane@example.com"},
+                headers={"x-csrf-token": "csrf-token"},
             )
             assert created.status_code == 201
             user_id = created.json()["id"]
 
             fetched = await client.get(f"/api/v1/users/{user_id}")
             assert fetched.status_code == 200
-            assert fetched.json()["role"] == "user"
+            assert fetched.json()["role"] == "member"
 
             updated = await client.patch(
                 f"/api/v1/users/{user_id}",
                 json={"name": "Jane Updated", "role": "admin"},
+                headers={"x-csrf-token": "csrf-token"},
             )
             assert updated.status_code == 200
             assert updated.json()["name"] == "Jane Updated"
 
-            deleted = await client.delete(f"/api/v1/users/{user_id}")
+            deleted = await client.delete(
+                f"/api/v1/users/{user_id}",
+                headers={"x-csrf-token": "csrf-token"},
+            )
             assert deleted.status_code == 204
             assert (await client.get(f"/api/v1/users/{user_id}")).status_code == 404
 
