@@ -62,7 +62,15 @@ def create_user(_: AdminUserDep, user: UserCreate, db: SessionDep, __: CsrfDep) 
     except user_service.UserAlreadyExistsError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email already exists",
+            detail={
+                "code": "USER_CONFLICT",
+                "message": "A user with this email already exists",
+            },
+        ) from None
+    except user_service.InvalidUserError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "USER_INVALID", "message": str(exc)},
         ) from None
 
 
@@ -72,7 +80,8 @@ def get_user(user_id: int, _: AdminUserDep, db: SessionDep) -> User:
         return user_service.get_user(db, user_id)
     except user_service.UserNotFoundError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "USER_NOT_FOUND", "message": "User not found"},
         ) from None
 
 
@@ -92,21 +101,29 @@ def update_user(
         )
     except user_service.UserNotFoundError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "USER_NOT_FOUND", "message": "User not found"},
         ) from None
     except user_service.UserAlreadyExistsError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email already exists",
+            detail={
+                "code": "USER_CONFLICT",
+                "message": "A user with this email already exists",
+            },
         ) from None
     except user_service.InvalidUserError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "USER_INVALID", "message": str(exc)},
         ) from None
     except user_service.LastAdminError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="The final administrator cannot be removed or demoted",
+            detail={
+                "code": "LAST_ADMIN_PROTECTED",
+                "message": "The final administrator cannot be removed or demoted",
+            },
         ) from None
 
 
@@ -114,16 +131,20 @@ def update_user(
 def delete_user(user_id: int, admin: AdminUserDep, db: SessionDep, __: CsrfDep) -> None:
     try:
         user_service.ensure_user_deletable(db, user_id)
-        ledger_service.delete_owner_data(db, user_id)
+        ledger_service.delete_owner_data(db, user_id, actor_user_id=admin.id)
         user_service.delete_user(db, user_id, actor_user_id=admin.id)
     except user_service.UserNotFoundError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "USER_NOT_FOUND", "message": "User not found"},
         ) from None
     except user_service.LastAdminError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="The final administrator cannot be deleted",
+            detail={
+                "code": "LAST_ADMIN_PROTECTED",
+                "message": "The final administrator cannot be deleted",
+            },
         ) from None
 
 
@@ -149,18 +170,25 @@ def update_application_grant(
         )
     except user_service.UserNotFoundError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "USER_NOT_FOUND", "message": "User not found"},
         ) from None
 
 
 @router.post("/{user_id}/sessions/revoke", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_user_sessions(
-    user_id: int, _: AdminUserDep, db: SessionDep, __: CsrfDep
+    user_id: int, admin: AdminUserDep, db: SessionDep, __: CsrfDep
 ) -> None:
     try:
         user_service.get_user(db, user_id)
     except user_service.UserNotFoundError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "USER_NOT_FOUND", "message": "User not found"},
         ) from None
-    session_service.revoke_all(db, user_id)
+    session_service.revoke_all(
+        db,
+        user_id,
+        actor_user_id=admin.id,
+        reason="admin_revocation",
+    )

@@ -27,13 +27,17 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.get("/google/login")
-async def google_login(request: Request) -> RedirectResponse:
+async def google_login(request: Request, db: SessionDep) -> RedirectResponse:
     try:
         google = auth_service.get_google_client()
     except auth_service.GoogleOAuthNotConfiguredError:
+        _record_auth_failure(db, "oauth_not_configured")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Google OAuth is not configured",
+            detail={
+                "code": "GOOGLE_AUTH_UNAVAILABLE",
+                "message": "Google authentication is unavailable",
+            },
         ) from None
     nonce = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
@@ -57,12 +61,35 @@ async def google_login(request: Request) -> RedirectResponse:
 async def google_callback(request: Request, db: SessionDep) -> RedirectResponse:
     try:
         google = auth_service.get_google_client()
+        nonce = request.session.pop("oauth_nonce", None)
+        if not nonce:
+            _record_auth_failure(db, "state_invalid")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "GOOGLE_STATE_INVALID",
+                    "message": "Google authentication failed",
+                },
+            )
         verifier = request.session.pop("oauth_code_verifier", None)
+        if not verifier:
+            _record_auth_failure(db, "pkce_invalid")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "GOOGLE_PKCE_INVALID",
+                    "message": "Google authentication failed",
+                },
+            )
         token = await google.authorize_access_token(request, code_verifier=verifier)
     except auth_service.GoogleOAuthNotConfiguredError:
+        _record_auth_failure(db, "oauth_not_configured")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Google OAuth is not configured",
+            detail={
+                "code": "GOOGLE_AUTH_UNAVAILABLE",
+                "message": "Google authentication is unavailable",
+            },
         ) from None
     except OAuthError:
         _record_auth_failure(db, "oauth_error")
@@ -74,24 +101,12 @@ async def google_callback(request: Request, db: SessionDep) -> RedirectResponse:
             },
         ) from None
 
-    nonce = request.session.pop("oauth_nonce", None)
-    if not nonce:
-        _record_auth_failure(db, "state_invalid")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "GOOGLE_STATE_INVALID",
-                "message": "Google authentication failed",
-            },
-        )
     userinfo = None
     if token.get("id_token"):
         try:
             userinfo = await google.parse_id_token(token, nonce=nonce)
         except Exception:
             userinfo = None
-    if not userinfo:
-        userinfo = token.get("userinfo")
     if not userinfo or not userinfo.get("sub") or not userinfo.get("email"):
         _record_auth_failure(db, "identity_invalid")
         raise HTTPException(
@@ -101,7 +116,7 @@ async def google_callback(request: Request, db: SessionDep) -> RedirectResponse:
                 "message": "Google did not return a usable identity",
             },
         )
-    if nonce and userinfo.get("nonce") not in (None, nonce):
+    if userinfo.get("nonce") != nonce:
         _record_auth_failure(db, "nonce_invalid")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -131,14 +146,17 @@ async def google_callback(request: Request, db: SessionDep) -> RedirectResponse:
         _record_auth_failure(db, "user_exists")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "USER_EXISTS", "message": "Google authentication failed"},
+            detail={
+                "code": "GOOGLE_AUTH_FAILED",
+                "message": "Google authentication failed",
+            },
         ) from None
     except user_service.GoogleIdentityConflictError:
         _record_auth_failure(db, "identity_conflict")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "code": "GOOGLE_IDENTITY_CONFLICT",
+                "code": "GOOGLE_AUTH_FAILED",
                 "message": "Google authentication failed",
             },
         ) from None
@@ -157,7 +175,10 @@ async def google_callback(request: Request, db: SessionDep) -> RedirectResponse:
     except RuntimeError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="JWT authentication is not configured",
+            detail={
+                "code": "AUTH_UNAVAILABLE",
+                "message": "Authentication is unavailable",
+            },
         ) from None
     set_auth_cookie(response, token)
     set_refresh_cookie(response, refresh_token)
@@ -171,9 +192,15 @@ def me(user: CurrentUserDep) -> User:
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(request: Request, db: SessionDep, _: CsrfDep) -> Response:
+def logout(
+    request: Request, db: SessionDep, _: CsrfDep, user: CurrentUserDep
+) -> Response:
     request.session.clear()
-    session_service.revoke_token(db, request.cookies.get(settings.refresh_cookie_name))
+    session_service.revoke_token(
+        db,
+        request.cookies.get(settings.refresh_cookie_name),
+        actor_user_id=user.id,
+    )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_auth_cookie(response)
     return response
@@ -208,7 +235,7 @@ def refresh(request: Request, db: SessionDep, _: CsrfDep) -> Response:
 
 @router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
 def logout_all(user: CurrentUserDep, db: SessionDep, _: CsrfDep) -> Response:
-    session_service.revoke_all(db, user.id)
+    session_service.revoke_all(db, user.id, actor_user_id=user.id)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_auth_cookie(response)
     return response
@@ -217,8 +244,7 @@ def logout_all(user: CurrentUserDep, db: SessionDep, _: CsrfDep) -> Response:
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
 def delete_me(user: CurrentUserDep, db: SessionDep, _: CsrfDep) -> Response:
     user_service.ensure_user_deletable(db, user.id)
-    ledger_service.delete_owner_data(db, user.id)
-    session_service.revoke_all(db, user.id)
+    ledger_service.delete_owner_data(db, user.id, actor_user_id=user.id)
     user_service.delete_user(db, user.id, actor_user_id=user.id)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_auth_cookie(response)

@@ -47,12 +47,28 @@ class FakeGoogleClient:
         return self.claims | {"nonce": nonce}
 
 
-def test_google_login_generates_state_nonce_and_pkce(monkeypatch) -> None:
+class InvalidIdTokenClient(FakeGoogleClient):
+    async def authorize_access_token(self, request, **kwargs):
+        self.code_verifier = kwargs.get("code_verifier")
+        return {
+            "id_token": "invalid-id-token",
+            "userinfo": {
+                "sub": "google-subject",
+                "email": "person@example.com",
+                "email_verified": True,
+            },
+        }
+
+    async def parse_id_token(self, token, nonce):
+        raise ValueError("invalid ID token")
+
+
+def test_google_login_generates_state_nonce_and_pkce(db, monkeypatch) -> None:
     client = FakeGoogleClient()
     monkeypatch.setattr(auth_service, "get_google_client", lambda: client)
     request = _request()
 
-    response = asyncio.run(google_login(request))
+    response = asyncio.run(google_login(request, db))
 
     assert response.status_code == 307
     assert request.session["oauth_nonce"]
@@ -101,3 +117,29 @@ def test_google_callback_rejects_missing_oauth_state(db, monkeypatch) -> None:
 
     assert error.value.status_code == 400
     assert error.value.detail["code"] == "GOOGLE_STATE_INVALID"
+
+
+def test_google_callback_rejects_invalid_id_token_instead_of_using_userinfo(
+    db, monkeypatch
+) -> None:
+    client = InvalidIdTokenClient()
+    monkeypatch.setattr(auth_service, "get_google_client", lambda: client)
+    request = _request({"oauth_nonce": "nonce", "oauth_code_verifier": "verifier"})
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(google_callback(request, db))
+
+    assert error.value.status_code == 400
+    assert error.value.detail["code"] == "GOOGLE_IDENTITY_INVALID"
+    assert db.query(User).count() == 0
+
+
+def test_google_callback_rejects_missing_pkce_verifier(db, monkeypatch) -> None:
+    monkeypatch.setattr(auth_service, "get_google_client", FakeGoogleClient)
+    request = _request({"oauth_nonce": "nonce"})
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(google_callback(request, db))
+
+    assert error.value.status_code == 400
+    assert error.value.detail["code"] == "GOOGLE_PKCE_INVALID"

@@ -71,6 +71,12 @@ def test_guest_approval_demotion_and_application_grant_lifecycle(db) -> None:
         enabled=False,
     )
     assert db.get(RefreshSession, session_id).revoked_at is not None
+    assert any(
+        event.action == "auth.sessions_revoked"
+        and event.actor_user_id == admin.id
+        and event.target_user_id == member.id
+        for event in audit_service.list_events(db, target_user_id=member.id)
+    )
 
     demoted = update_user(db, member.id, role=UserRole.GUEST, actor_user_id=admin.id)
     assert demoted.role == UserRole.GUEST

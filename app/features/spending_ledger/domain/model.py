@@ -5,6 +5,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -36,6 +37,15 @@ class Category(Base):
             "name",
             "category_type",
             name="uq_ledger_categories_owner_parent_name_type",
+        ),
+        Index(
+            "uq_ledger_categories_owner_parent_name_type_root",
+            "owner_id",
+            "parent_id",
+            "name",
+            "category_type",
+            unique=True,
+            postgresql_nulls_not_distinct=True,
         ),
     )
 

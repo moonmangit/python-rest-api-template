@@ -12,6 +12,7 @@ app/
 ├── shared/     # Cross-feature dependencies and health checks
 └── features/
     ├── auth/         # Google OAuth and JWT authentication
+    ├── spending_ledger/ # Private income and expense ledger
     └── users/
         ├── domain/        # User entity and persistence model
         ├── application/   # User use cases
@@ -173,6 +174,10 @@ The API runs at `http://127.0.0.1:3001`.
 - `GET /api/v1/auth/google/login` starts Google login.
 - `GET /api/v1/auth/me` returns the logged-in user.
 - `POST /api/v1/auth/logout` clears the JWT authentication cookie.
+- `POST /api/v1/auth/refresh` rotates the refresh session.
+- `GET /api/v1/ledger/categories` lists the current user's categories.
+- `GET /api/v1/ledger/records` lists the current user's records.
+- `GET /api/v1/ledger/reports` returns ledger totals and time series.
 - `GET /docs` opens the development OpenAPI UI.
 
 Copy `.env.example` to `.env` when local configuration overrides are needed. Missing
@@ -188,8 +193,9 @@ http://127.0.0.1:3001/api/v1/auth/google/callback
 
 Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and a random `JWT_SECRET_KEY` in
 `.env`. Authentication uses a signed JWT stored in an `HttpOnly` cookie named
-`access_token`. The first Google account becomes `admin`; later accounts become
-`user`. User CRUD endpoints require an admin JWT.
+`access_token`, plus a server-tracked refresh session. The first Google account
+becomes `admin`; later accounts become restricted `guest` users. User CRUD
+endpoints require an admin JWT.
 
 Run `just check` before opening a pull request. CI runs the same quality checks
 with the locked uv dependencies.

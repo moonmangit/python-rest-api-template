@@ -118,13 +118,24 @@ def update_user(
         raise UserAlreadyExistsError from exc
     db.refresh(user)
     if user.status == UserStatus.DISABLED or user.role == UserRole.GUEST:
-        revoke_all(db, user.id)
+        revoke_all(
+            db,
+            user.id,
+            actor_user_id=actor_user_id,
+            reason="account_restricted",
+        )
     return user
 
 
 def delete_user(db: Session, user_id: int, *, actor_user_id: int | None = None) -> None:
     user = get_user(db, user_id)
     _ensure_admin_remains(db, user, None, None)
+    revoke_all(
+        db,
+        user.id,
+        actor_user_id=actor_user_id,
+        reason="account_deleted",
+    )
     add_event(
         db,
         action="user.deleted",
@@ -167,6 +178,9 @@ def authenticate_google_user(
         user = email_user
 
     if user is not None and user.google_subject not in (None, google_subject):
+        raise GoogleIdentityConflictError
+
+    if subject_user is None and email_user is not None:
         raise GoogleIdentityConflictError
 
     if user is None:

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import hash_refresh_token, new_refresh_token
+from app.features.auth.application.audit_service import add_event
 from app.features.auth.domain.model import RefreshSession
 
 
@@ -53,7 +54,7 @@ def rotate_session(
         raise RefreshSessionError
     if session.revoked_at is not None:
         if session.replaced_by_id is not None:
-            revoke_all(db, session.user_id)
+            revoke_all(db, session.user_id, reason="refresh_reuse")
         raise RefreshSessionError
     if _as_utc(session.expires_at) <= now:
         session.revoked_at = now
@@ -80,7 +81,13 @@ def rotate_session(
     return new_id, new_token, replacement
 
 
-def revoke_token(db: Session, refresh_token: str | None) -> None:
+def revoke_token(
+    db: Session,
+    refresh_token: str | None,
+    *,
+    actor_user_id: int | None = None,
+    reason: str = "logout",
+) -> None:
     if not refresh_token:
         return
     session = db.scalar(
@@ -90,10 +97,25 @@ def revoke_token(db: Session, refresh_token: str | None) -> None:
     )
     if session is not None and session.revoked_at is None:
         session.revoked_at = datetime.now(timezone.utc)
+        add_event(
+            db,
+            action="auth.session_revoked",
+            entity_type="session",
+            actor_user_id=actor_user_id,
+            target_user_id=session.user_id,
+            entity_id=session.id,
+            metadata={"reason": reason},
+        )
         db.commit()
 
 
-def revoke_all(db: Session, user_id: int) -> None:
+def revoke_all(
+    db: Session,
+    user_id: int,
+    *,
+    actor_user_id: int | None = None,
+    reason: str = "logout_all",
+) -> None:
     now = datetime.now(timezone.utc)
     sessions = db.scalars(
         select(RefreshSession).where(
@@ -103,6 +125,14 @@ def revoke_all(db: Session, user_id: int) -> None:
     ).all()
     for session in sessions:
         session.revoked_at = now
+    add_event(
+        db,
+        action="auth.sessions_revoked",
+        entity_type="session",
+        actor_user_id=actor_user_id,
+        target_user_id=user_id,
+        metadata={"reason": reason, "count": len(sessions)},
+    )
     db.commit()
 
 

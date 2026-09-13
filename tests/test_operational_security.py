@@ -32,3 +32,18 @@ def test_auth_rate_limit_returns_stable_error() -> None:
             assert response.json()["detail"]["code"] == "RATE_LIMITED"
 
     asyncio.run(exercise())
+
+
+def test_production_rejects_non_https_requests(monkeypatch) -> None:
+    monkeypatch.setattr("app.main.settings.environment", "production")
+
+    async def exercise() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            response = await client.get("/")
+            assert response.status_code == 400
+            assert response.json()["detail"]["code"] == "HTTPS_REQUIRED"
+
+    asyncio.run(exercise())

@@ -2,7 +2,7 @@ import base64
 import hashlib
 import json
 from calendar import monthrange
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -110,6 +110,7 @@ def update_category(
             category.id,
             category_type or category.category_type,
         )
+        category.name = normalized_name
     elif category_type is not None and category_type != category.category_type:
         _ensure_category_name_available(
             db,
@@ -119,7 +120,6 @@ def update_category(
             category.id,
             category_type,
         )
-        category.name = normalized_name
     if sort_order is not None:
         category.sort_order = sort_order
     if category_type is not None:
@@ -185,6 +185,8 @@ def create_record(
     idempotency_key: str | None = None,
 ) -> LedgerRecord:
     record_type = RecordType(record_type)
+    if not isinstance(record_date, date):
+        raise LedgerValidationError("Record date is invalid")
     payload = {
         "record_type": record_type.value,
         "amount_minor": amount_minor,
@@ -216,6 +218,7 @@ def create_record(
         owner_id,
         record_type,
         amount_minor,
+        record_date,
         category_id,
         subcategory_id,
         note,
@@ -352,6 +355,7 @@ def update_record(
         owner_id,
         new_type,
         new_amount,
+        record_date or record.record_date,
         new_category,
         new_subcategory,
         record.note if note is _UNSET else note,
@@ -379,6 +383,47 @@ def update_record(
 
 def delete_record(db: Session, owner_id: int, record_id: int) -> list[str]:
     record = _get_record(db, owner_id, record_id)
+    record_values = {
+        "id": record.id,
+        "owner_id": record.owner_id,
+        "record_type": record.record_type,
+        "amount_minor": record.amount_minor,
+        "currency_code": record.currency_code,
+        "record_date": record.record_date,
+        "category_id": record.category_id,
+        "subcategory_id": record.subcategory_id,
+        "note": record.note,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+    }
+    attachment_values = [
+        {
+            "id": attachment.id,
+            "owner_id": attachment.owner_id,
+            "record_id": attachment.record_id,
+            "storage_key": attachment.storage_key,
+            "content_type": attachment.content_type,
+            "byte_size": attachment.byte_size,
+            "checksum": attachment.checksum,
+            "created_at": attachment.created_at,
+        }
+        for attachment in db.scalars(
+            select(Attachment).where(Attachment.record_id == record.id)
+        ).all()
+    ]
+    idempotency_values = [
+        {
+            "id": key.id,
+            "owner_id": key.owner_id,
+            "key": key.key,
+            "request_hash": key.request_hash,
+            "record_id": key.record_id,
+            "created_at": key.created_at,
+        }
+        for key in db.scalars(
+            select(IdempotencyKey).where(IdempotencyKey.record_id == record.id)
+        ).all()
+    ]
     keys = list(
         db.scalars(
             select(Attachment.storage_key).where(Attachment.record_id == record.id)
@@ -399,17 +444,45 @@ def delete_record(db: Session, owner_id: int, record_id: int) -> list[str]:
         entity_id=str(record.id),
     )
     db.delete(record)
-    db.commit()
-    _remove_files(keys)
+    committed = False
+    try:
+        db.commit()
+        committed = True
+        _remove_files(keys)
+    except Exception:
+        db.rollback()
+        if committed:
+            db.expunge_all()
+            if db.get(LedgerRecord, record_id) is None:
+                db.add(LedgerRecord(**record_values))
+                db.flush()
+                db.add_all(Attachment(**values) for values in attachment_values)
+                db.add_all(IdempotencyKey(**values) for values in idempotency_values)
+            db.commit()
+        raise
     return keys
 
 
-def delete_owner_data(db: Session, owner_id: int) -> list[str]:
+def delete_owner_data(
+    db: Session, owner_id: int, *, actor_user_id: int | None = None
+) -> list[str]:
     keys = list(
         db.scalars(
             select(Attachment.storage_key).where(Attachment.owner_id == owner_id)
         ).all()
     )
+    record_ids = db.scalars(
+        select(LedgerRecord.id).where(LedgerRecord.owner_id == owner_id)
+    ).all()
+    for record_id in record_ids:
+        add_event(
+            db,
+            action="ledger.record_deleted",
+            entity_type="record",
+            actor_user_id=actor_user_id,
+            target_user_id=owner_id,
+            entity_id=str(record_id),
+        )
     db.query(Attachment).filter(Attachment.owner_id == owner_id).delete(
         synchronize_session=False
     )
@@ -443,7 +516,10 @@ def report(
     start_date, end_date = _report_range(start_date, end_date, timezone_name)
     if end_date < start_date:
         raise LedgerValidationError("End date must not precede start date")
-    if (end_date - start_date).days > 366:
+    months = (
+        (end_date.year - start_date.year) * 12 + end_date.month - start_date.month + 1
+    )
+    if months > 12:
         raise LedgerValidationError("Report range cannot exceed 12 months")
     _validate_currency(currency_code)
     if granularity not in {"day", "month"}:
@@ -518,30 +594,90 @@ def create_attachment(
     key = f"{uuid4().hex}.{extension}"
     path = _storage_path(key)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(content)
-    attachment = Attachment(
-        owner_id=owner_id,
-        record_id=record.id,
-        storage_key=key,
-        content_type=content_type,
-        byte_size=len(content),
-        checksum=hashlib.sha256(content).hexdigest(),
-    )
-    db.add(attachment)
-    db.flush()
-    add_event(
-        db,
-        action="ledger.attachment_created",
-        entity_type="attachment",
-        actor_user_id=owner_id,
-        target_user_id=owner_id,
-        entity_id=str(attachment.id),
-    )
+    committed = False
     try:
+        path.write_bytes(content)
+        attachment = Attachment(
+            owner_id=owner_id,
+            record_id=record.id,
+            storage_key=key,
+            content_type=content_type,
+            byte_size=len(content),
+            checksum=hashlib.sha256(content).hexdigest(),
+        )
+        db.add(attachment)
+        db.flush()
+        add_event(
+            db,
+            action="ledger.attachment_created",
+            entity_type="attachment",
+            actor_user_id=owner_id,
+            target_user_id=owner_id,
+            entity_id=str(attachment.id),
+        )
         db.commit()
+        committed = True
     except Exception:
         db.rollback()
-        path.unlink(missing_ok=True)
+        if not committed:
+            path.unlink(missing_ok=True)
+        raise
+    db.refresh(attachment)
+    return attachment
+
+
+def replace_attachment(
+    db: Session,
+    owner_id: int,
+    attachment_id: int,
+    *,
+    content: bytes,
+    content_type: str,
+) -> Attachment:
+    attachment = get_attachment(db, owner_id, attachment_id)
+    _validate_image(content, content_type)
+    extension = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}[
+        content_type
+    ]
+    new_key = f"{uuid4().hex}.{extension}"
+    new_path = _storage_path(new_key)
+    old_key = attachment.storage_key
+    old_values = {
+        "storage_key": old_key,
+        "content_type": attachment.content_type,
+        "byte_size": attachment.byte_size,
+        "checksum": attachment.checksum,
+    }
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+    committed = False
+    try:
+        new_path.write_bytes(content)
+        attachment.storage_key = new_key
+        attachment.content_type = content_type
+        attachment.byte_size = len(content)
+        attachment.checksum = hashlib.sha256(content).hexdigest()
+        add_event(
+            db,
+            action="ledger.attachment_updated",
+            entity_type="attachment",
+            actor_user_id=owner_id,
+            target_user_id=owner_id,
+            entity_id=str(attachment.id),
+        )
+        db.commit()
+        committed = True
+        _remove_files([old_key])
+    except Exception:
+        if not committed:
+            db.rollback()
+            new_path.unlink(missing_ok=True)
+        else:
+            attachment = db.get(Attachment, attachment_id)
+            if attachment is not None:
+                for field, value in old_values.items():
+                    setattr(attachment, field, value)
+                db.commit()
+            new_path.unlink(missing_ok=True)
         raise
     db.refresh(attachment)
     return attachment
@@ -576,6 +712,16 @@ def attachment_file_path(attachment: Attachment) -> Path:
 def delete_attachment(db: Session, owner_id: int, attachment_id: int) -> str:
     attachment = get_attachment(db, owner_id, attachment_id)
     key = attachment.storage_key
+    values = {
+        "id": attachment.id,
+        "owner_id": attachment.owner_id,
+        "record_id": attachment.record_id,
+        "storage_key": attachment.storage_key,
+        "content_type": attachment.content_type,
+        "byte_size": attachment.byte_size,
+        "checksum": attachment.checksum,
+        "created_at": attachment.created_at,
+    }
     add_event(
         db,
         action="ledger.attachment_deleted",
@@ -585,8 +731,17 @@ def delete_attachment(db: Session, owner_id: int, attachment_id: int) -> str:
         entity_id=str(attachment.id),
     )
     db.delete(attachment)
-    db.commit()
-    _remove_files([key])
+    committed = False
+    try:
+        db.commit()
+        committed = True
+        _remove_files([key])
+    except Exception:
+        db.rollback()
+        if committed and db.get(Attachment, attachment_id) is None:
+            db.add(Attachment(**values))
+            db.commit()
+        raise
     return key
 
 
@@ -662,6 +817,7 @@ def _validate_record(
     owner_id: int,
     record_type: RecordType,
     amount_minor: int,
+    record_date: date,
     category_id: int,
     subcategory_id: int | None,
     note: str | None,
@@ -669,11 +825,17 @@ def _validate_record(
 ) -> None:
     if amount_minor <= 0:
         raise LedgerValidationError("Amount must be greater than zero")
+    if not isinstance(record_date, date):
+        raise LedgerValidationError("Record date is invalid")
     _validate_currency(currency_code)
     if note is not None and len(note) > 5000:
         raise LedgerValidationError("Note cannot exceed 5,000 characters")
     category = _get_category(db, owner_id, category_id)
-    if category.archived or not _category_allows(category.category_type, record_type):
+    if (
+        category.parent_id is not None
+        or category.archived
+        or not _category_allows(category.category_type, record_type)
+    ):
         raise LedgerValidationError("Category cannot be used for this record")
     if subcategory_id is not None:
         subcategory = _get_category(db, owner_id, subcategory_id)
@@ -736,8 +898,8 @@ def _report_range(
         return start_date or end_date, end_date or start_date
     try:
         today = datetime.now(ZoneInfo(timezone_name)).date()
-    except ZoneInfoNotFoundError:
-        today = datetime.now(timezone.utc).date()
+    except ZoneInfoNotFoundError as exc:
+        raise LedgerValidationError("Invalid timezone") from exc
     return today.replace(day=1), today.replace(
         day=monthrange(today.year, today.month)[1]
     )

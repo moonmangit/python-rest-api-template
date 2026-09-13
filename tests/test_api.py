@@ -4,6 +4,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.security import create_access_token
+from app.features.auth.application import session_service
 from app.features.users.application.service import create_user
 from app.features.users.domain import UserRole
 from app.main import app
@@ -23,6 +24,7 @@ def test_user_routes_require_admin_and_support_crud(db, monkeypatch) -> None:
     admin = create_user(
         db, name="Admin", email="admin@example.com", role=UserRole.ADMIN
     )
+    session_id, _, _ = session_service.create_session(db, admin.id)
     monkeypatch.setattr(
         settings, "jwt_secret_key", "test-jwt-secret-32-bytes-long-value"
     )
@@ -34,7 +36,9 @@ def test_user_routes_require_admin_and_support_crud(db, monkeypatch) -> None:
             transport=transport, base_url="http://testserver"
         ) as client:
             assert (await client.get("/api/v1/users/")).status_code == 401
-            client.cookies.set(settings.auth_cookie_name, create_access_token(admin.id))
+            client.cookies.set(
+                settings.auth_cookie_name, create_access_token(admin.id, session_id)
+            )
             client.cookies.set(settings.csrf_cookie_name, "csrf-token")
             authenticated = await client.get("/api/v1/auth/me")
             assert authenticated.status_code == 200

@@ -1,4 +1,5 @@
 import secrets
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
@@ -21,30 +22,35 @@ def get_current_user(request: Request, db: SessionDep) -> User:
     if not isinstance(user_id, str) or not user_id.isdigit():
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
+            detail={"code": "AUTH_REQUIRED", "message": "Authentication required"},
         )
     user_id_value = int(user_id)
     session_id = claims.get("sid")
-    if (
-        session_id
-        and db.scalar(
-            select(RefreshSession.id).where(
-                RefreshSession.id == session_id,
-                RefreshSession.user_id == user_id_value,
-                RefreshSession.revoked_at.is_(None),
-            )
+    if not isinstance(session_id, str) or not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": "AUTH_REQUIRED", "message": "Authentication required"},
         )
-        is None
+    session = db.scalar(
+        select(RefreshSession).where(
+            RefreshSession.id == session_id,
+            RefreshSession.user_id == user_id_value,
+        )
+    )
+    if (
+        session is None
+        or session.revoked_at is not None
+        or _as_utc(session.expires_at) <= datetime.now(timezone.utc)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
+            detail={"code": "AUTH_REQUIRED", "message": "Authentication required"},
         )
     user = db.get(User, user_id_value)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
+            detail={"code": "AUTH_REQUIRED", "message": "Authentication required"},
         )
     return user
 
@@ -112,3 +118,9 @@ def require_spending_ledger_access(user: CurrentUserDep, db: SessionDep) -> User
 
 
 SpendingLedgerUserDep = Annotated[User, Depends(require_spending_ledger_access)]
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)

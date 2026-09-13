@@ -46,18 +46,16 @@ def test_google_login_reuses_existing_identity(db) -> None:
     assert logged_in.email == "person@example.com"
 
 
-def test_google_login_links_existing_email_account(db) -> None:
-    existing = create_user(db, name="Existing User", email="person@example.com")
+def test_google_login_does_not_link_existing_email_account(db) -> None:
+    create_user(db, name="Existing User", email="person@example.com")
 
-    logged_in = authenticate_google_user(
-        db,
-        google_subject="google-subject",
-        name="Google Name",
-        email="PERSON@example.com",
-    )
-
-    assert logged_in.id == existing.id
-    assert logged_in.google_subject == "google-subject"
+    with pytest.raises(GoogleIdentityConflictError):
+        authenticate_google_user(
+            db,
+            google_subject="google-subject",
+            name="Google Name",
+            email="PERSON@example.com",
+        )
 
 
 def test_google_identity_and_email_cannot_cross_accounts(db) -> None:

@@ -43,9 +43,13 @@ def post_category(
         raise _http_error(
             status.HTTP_404_NOT_FOUND, "CATEGORY_NOT_FOUND", str(exc)
         ) from None
-    except (service.LedgerConflictError, service.LedgerValidationError) as exc:
+    except service.LedgerConflictError as exc:
         raise _http_error(
-            status.HTTP_409_CONFLICT, "CATEGORY_INVALID", str(exc)
+            status.HTTP_409_CONFLICT, "CATEGORY_CONFLICT", str(exc)
+        ) from None
+    except service.LedgerValidationError as exc:
+        raise _http_error(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "CATEGORY_INVALID", str(exc)
         ) from None
 
 
@@ -63,9 +67,13 @@ def patch_category(
         raise _http_error(
             status.HTTP_404_NOT_FOUND, "CATEGORY_NOT_FOUND", str(exc)
         ) from None
-    except (service.LedgerConflictError, service.LedgerValidationError) as exc:
+    except service.LedgerConflictError as exc:
         raise _http_error(
-            status.HTTP_409_CONFLICT, "CATEGORY_INVALID", str(exc)
+            status.HTTP_409_CONFLICT, "CATEGORY_CONFLICT", str(exc)
+        ) from None
+    except service.LedgerValidationError as exc:
+        raise _http_error(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "CATEGORY_INVALID", str(exc)
         ) from None
 
 
@@ -268,6 +276,33 @@ def download_attachment(
             status.HTTP_404_NOT_FOUND, "ATTACHMENT_NOT_FOUND", "Attachment not found"
         )
     return FileResponse(path, media_type=attachment.content_type)
+
+
+@router.put("/attachments/{attachment_id}", response_model=AttachmentResponse)
+async def replace_attachment(
+    attachment_id: int,
+    file: UploadFile,
+    user: SpendingLedgerUserDep,
+    db: SessionDep,
+    _: CsrfDep,
+):
+    content = await file.read(10 * 1024 * 1024 + 1)
+    try:
+        return service.replace_attachment(
+            db,
+            user.id,
+            attachment_id,
+            content=content,
+            content_type=file.content_type or "",
+        )
+    except service.LedgerNotFoundError as exc:
+        raise _http_error(
+            status.HTTP_404_NOT_FOUND, "ATTACHMENT_NOT_FOUND", str(exc)
+        ) from None
+    except service.LedgerValidationError as exc:
+        raise _http_error(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "ATTACHMENT_INVALID", str(exc)
+        ) from None
 
 
 @router.delete("/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -41,7 +41,12 @@ def set_application_grant(
     db.commit()
     db.refresh(grant)
     if not enabled:
-        revoke_all(db, user.id)
+        revoke_all(
+            db,
+            user.id,
+            actor_user_id=actor_user_id,
+            reason="application_access_disabled",
+        )
     return grant
 
 

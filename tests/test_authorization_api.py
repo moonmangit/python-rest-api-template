@@ -17,6 +17,7 @@ def test_admin_can_manage_status_grants_sessions_and_audit(db, monkeypatch) -> N
         db, name="Admin", email="admin@example.com", role=UserRole.ADMIN
     )
     member = create_user(db, name="Member", email="member@example.com")
+    admin_session_id, _, _ = session_service.create_session(db, admin.id)
     session_id, _, _ = session_service.create_session(db, member.id)
     monkeypatch.setattr(
         settings, "jwt_secret_key", "test-jwt-secret-32-bytes-long-value"
@@ -28,7 +29,10 @@ def test_admin_can_manage_status_grants_sessions_and_audit(db, monkeypatch) -> N
         async with httpx.AsyncClient(
             transport=transport, base_url="http://testserver"
         ) as client:
-            client.cookies.set(settings.auth_cookie_name, create_access_token(admin.id))
+            client.cookies.set(
+                settings.auth_cookie_name,
+                create_access_token(admin.id, admin_session_id),
+            )
             client.cookies.set(settings.csrf_cookie_name, "csrf-token")
             listed = await client.get(
                 "/api/v1/users/", params={"search": "member@example.com"}
@@ -48,7 +52,10 @@ def test_admin_can_manage_status_grants_sessions_and_audit(db, monkeypatch) -> N
             )
             assert (await client.get("/api/v1/auth/me")).status_code == 401
 
-            client.cookies.set(settings.auth_cookie_name, create_access_token(admin.id))
+            client.cookies.set(
+                settings.auth_cookie_name,
+                create_access_token(admin.id, admin_session_id),
+            )
             enabled = await client.patch(
                 f"/api/v1/users/{member.id}",
                 json={"status": UserStatus.ENABLED.value},
@@ -64,23 +71,32 @@ def test_admin_can_manage_status_grants_sessions_and_audit(db, monkeypatch) -> N
             revokable_session_id, _, _ = session_service.create_session(db, member.id)
 
             client.cookies.set(
-                settings.auth_cookie_name, create_access_token(member.id)
+                settings.auth_cookie_name,
+                create_access_token(member.id, revokable_session_id),
             )
             assert (await client.get("/api/v1/ledger/categories")).status_code == 200
 
-            client.cookies.set(settings.auth_cookie_name, create_access_token(admin.id))
+            client.cookies.set(
+                settings.auth_cookie_name,
+                create_access_token(admin.id, admin_session_id),
+            )
             disabled_grant = await client.patch(
                 f"/api/v1/users/{member.id}/applications/spending_ledger",
                 json={"enabled": False},
                 headers={"x-csrf-token": "csrf-token"},
             )
             assert disabled_grant.status_code == 200
+            blocked_session_id, _, _ = session_service.create_session(db, member.id)
             client.cookies.set(
-                settings.auth_cookie_name, create_access_token(member.id)
+                settings.auth_cookie_name,
+                create_access_token(member.id, blocked_session_id),
             )
             assert (await client.get("/api/v1/ledger/categories")).status_code == 403
 
-            client.cookies.set(settings.auth_cookie_name, create_access_token(admin.id))
+            client.cookies.set(
+                settings.auth_cookie_name,
+                create_access_token(admin.id, admin_session_id),
+            )
             revoke = await client.post(
                 f"/api/v1/users/{member.id}/sessions/revoke",
                 headers={"x-csrf-token": "csrf-token"},

@@ -1,0 +1,19 @@
+meta {
+  name: Replace Ledger Attachment
+  type: http
+  seq: 14
+}
+
+put {
+  url: {{baseUrl}}/api/v1/ledger/attachments/1
+  body: multipart
+  auth: none
+}
+
+headers {
+  x-csrf-token: {{csrfToken}}
+}
+
+body:multipart {
+  file: @file(./receipt.png)
+}

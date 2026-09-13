@@ -119,6 +119,47 @@ def test_category_lifecycle_type_scope_and_record_update(db) -> None:
     assert income.category_type == CategoryType.INCOME
 
 
+def test_category_rename_and_type_only_update(db) -> None:
+    user = _admin(db)
+    category = service.create_category(
+        db, user.id, name="Utilities", category_type=CategoryType.BOTH
+    )
+
+    renamed = service.update_category(db, user.id, category.id, name="Bills")
+    assert renamed.name == "Bills"
+
+    typed = service.update_category(
+        db, user.id, category.id, category_type=CategoryType.EXPENSE
+    )
+    assert typed.name == "Bills"
+    assert typed.category_type == CategoryType.EXPENSE
+
+
+def test_category_database_constraint_includes_type_scope() -> None:
+    constraints = {
+        constraint.name
+        for constraint in service.Category.__table__.constraints
+        if constraint.name
+    }
+    assert "uq_ledger_categories_owner_parent_name_type" in constraints
+
+
+def test_subcategory_cannot_be_used_as_record_category(db) -> None:
+    user = _admin(db)
+    parent = service.create_category(db, user.id, name="Household")
+    child = service.create_category(db, user.id, name="Food", parent_id=parent.id)
+
+    with pytest.raises(service.LedgerValidationError):
+        service.create_record(
+            db,
+            user.id,
+            record_type=RecordType.EXPENSE,
+            amount_minor=100,
+            record_date=date(2026, 1, 1),
+            category_id=child.id,
+        )
+
+
 def test_archived_category_cannot_be_used_and_owner_isolation_is_enforced(db) -> None:
     owner = _admin(db)
     other = create_user(db, name="Other", email="other@example.com")
@@ -207,6 +248,12 @@ def test_record_filters_pagination_and_report_validation(db) -> None:
             end_date=date(2022, 1, 1),
         )
     with pytest.raises(service.LedgerValidationError):
+        service.report(
+            db,
+            user.id,
+            timezone_name="Invalid/Timezone",
+        )
+    with pytest.raises(service.LedgerValidationError):
         service.list_records(db, user.id, currency_code="EUR")
 
 
@@ -237,6 +284,109 @@ def test_attachment_is_stored_outside_database_and_deleted(
 
     service.delete_attachment(db, user.id, attachment.id)
     assert not path.exists()
+
+
+def test_attachment_can_be_replaced_after_new_state_is_stored(
+    db, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path))
+    user = _admin(db)
+    category = service.create_category(db, user.id, name="Receipts")
+    record = service.create_record(
+        db,
+        user.id,
+        record_type=RecordType.EXPENSE,
+        amount_minor=500,
+        record_date=date.today(),
+        category_id=category.id,
+    )
+    attachment = service.create_attachment(
+        db,
+        user.id,
+        record.id,
+        content=b"\x89PNG\r\n\x1a\nold",
+        content_type="image/png",
+    )
+    old_path = service.attachment_file_path(attachment)
+
+    replaced = service.replace_attachment(
+        db,
+        user.id,
+        attachment.id,
+        content=b"\xff\xd8\xffnew",
+        content_type="image/jpeg",
+    )
+
+    new_path = service.attachment_file_path(replaced)
+    assert replaced.content_type == "image/jpeg"
+    assert new_path.is_file()
+    assert not old_path.exists()
+
+
+def test_attachment_delete_failure_keeps_metadata_for_retry(
+    db, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path))
+    user = _admin(db)
+    category = service.create_category(db, user.id, name="Receipts")
+    record = service.create_record(
+        db,
+        user.id,
+        record_type=RecordType.EXPENSE,
+        amount_minor=500,
+        record_date=date.today(),
+        category_id=category.id,
+    )
+    attachment = service.create_attachment(
+        db,
+        user.id,
+        record.id,
+        content=b"\x89PNG\r\n\x1a\nimage",
+        content_type="image/png",
+    )
+    path = service.attachment_file_path(attachment)
+    monkeypatch.setattr(
+        service, "_remove_files", lambda keys: (_ for _ in ()).throw(OSError())
+    )
+
+    with pytest.raises(OSError):
+        service.delete_attachment(db, user.id, attachment.id)
+
+    assert service.get_attachment(db, user.id, attachment.id).id == attachment.id
+    assert path.is_file()
+
+
+def test_record_delete_failure_keeps_record_and_attachment_for_retry(
+    db, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path))
+    user = _admin(db)
+    category = service.create_category(db, user.id, name="Receipts")
+    record = service.create_record(
+        db,
+        user.id,
+        record_type=RecordType.EXPENSE,
+        amount_minor=500,
+        record_date=date.today(),
+        category_id=category.id,
+    )
+    attachment = service.create_attachment(
+        db,
+        user.id,
+        record.id,
+        content=b"\x89PNG\r\n\x1a\nimage",
+        content_type="image/png",
+    )
+    path = service.attachment_file_path(attachment)
+    monkeypatch.setattr(
+        service, "_remove_files", lambda keys: (_ for _ in ()).throw(OSError())
+    )
+
+    with pytest.raises(OSError):
+        service.delete_record(db, user.id, record.id)
+
+    assert service.get_record(db, user.id, record.id).id == record.id
+    assert path.is_file()
 
 
 def test_attachment_validation_and_failed_commit_cleanup(
@@ -284,3 +434,59 @@ def test_attachment_validation_and_failed_commit_cleanup(
     finally:
         db.commit = original_commit
     assert list(tmp_path.iterdir()) == []
+
+
+def test_attachment_flush_failure_does_not_leave_a_file(
+    db, tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path))
+    user = _admin(db)
+    category = service.create_category(db, user.id, name="Receipts")
+    record = service.create_record(
+        db,
+        user.id,
+        record_type=RecordType.EXPENSE,
+        amount_minor=500,
+        record_date=date.today(),
+        category_id=category.id,
+    )
+    original_flush = db.flush
+    db.flush = lambda: (_ for _ in ()).throw(RuntimeError("flush failed"))
+    try:
+        with pytest.raises(RuntimeError):
+            service.create_attachment(
+                db,
+                user.id,
+                record.id,
+                content=b"\x89PNG\r\n\x1a\nimage",
+                content_type="image/png",
+            )
+    finally:
+        db.flush = original_flush
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_idempotency_key_rejects_different_payload(db) -> None:
+    user = _admin(db)
+    category = service.create_category(db, user.id, name="Receipts")
+    service.create_record(
+        db,
+        user.id,
+        record_type=RecordType.EXPENSE,
+        amount_minor=100,
+        record_date=date(2026, 1, 1),
+        category_id=category.id,
+        idempotency_key="same-key",
+    )
+
+    with pytest.raises(service.LedgerConflictError):
+        service.create_record(
+            db,
+            user.id,
+            record_type=RecordType.EXPENSE,
+            amount_minor=200,
+            record_date=date(2026, 1, 1),
+            category_id=category.id,
+            idempotency_key="same-key",
+        )

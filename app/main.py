@@ -1,8 +1,11 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.config import settings
@@ -63,6 +66,40 @@ app.add_middleware(
 app.add_middleware(AuthRateLimitMiddleware, limit=settings.auth_rate_limit_per_minute)
 app.include_router(health_router)
 app.include_router(features_router, prefix=settings.api_v1_prefix)
+
+
+@app.middleware("http")
+async def enforce_https(request: Request, call_next):
+    if settings.environment == "production" and request.url.scheme != "https":
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": {
+                    "code": "HTTPS_REQUIRED",
+                    "message": "HTTPS is required",
+                }
+            },
+        )
+    response = await call_next(request)
+    if settings.environment == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    _: Request, exc: RequestValidationError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": {
+                "code": "VALIDATION_ERROR",
+                "message": "Request validation failed",
+                "errors": jsonable_encoder(exc.errors()),
+            }
+        },
+    )
 
 
 @app.get("/")
