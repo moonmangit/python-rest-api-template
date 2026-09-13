@@ -154,6 +154,7 @@ The API runs at `http://127.0.0.1:3001`.
 | `just setdown` | Stop PostgreSQL and preserve data |
 | `just clean` | Remove PostgreSQL containers and volumes |
 | `just dev` | Start the reload-enabled API server |
+| `just migrate` | Apply database migrations |
 | `just test` | Run tests |
 | `just lint` | Run Ruff checks |
 | `just format` | Format Python files |
@@ -167,9 +168,12 @@ The API runs at `http://127.0.0.1:3001`.
 - `POST /api/v1/users/` creates a user.
 - `GET /docs` opens the development OpenAPI UI.
 
-Copy `.env.example` to `.env` when local configuration overrides are needed. Missing
-tables are created automatically when the application starts. For local schema
-changes, use `just clean` only when existing development data can be discarded.
+Copy `.env.example` to `.env` when local configuration overrides are needed. The
+development server applies pending Alembic migrations before starting, and startup
+still creates missing local tables as a safety net. For local schema changes, add a
+new revision with `uv run alembic revision --autogenerate -m "describe change"`,
+review it, and apply it with `just migrate`. Use `just clean` only when existing
+development data can be discarded.
 
 Run `just check` before opening a pull request. CI runs the same quality checks
 with the locked uv dependencies.
